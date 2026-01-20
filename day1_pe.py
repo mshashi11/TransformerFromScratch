@@ -37,7 +37,7 @@ class PositionalEncoding(nn.Module):
         # Register it as a buffer: not a learnable parameter
         self.register_buffer('pe', pe)
 
-    def forward(self, x: torch.tensor):
+    def forward(self, x: torch.Tensor):
         """Forward propagation for a given input x. It adds the positional encoding to each
         entry of the embedding in the given tensor x"""
         # x is a tensor of dimension [batch, sequence_length, d_model]
