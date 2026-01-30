@@ -2,10 +2,12 @@
 "Implementation of a full Transformer model"
 
 import os
-import requests
+from typing import Tuple
 
 import torch
+import requests
 from torch import nn
+from torch.utils.data import Dataset, DataLoader
 
 from day1_pe import PositionalEncoding
 from day4_encoder import EncoderLayer
@@ -83,6 +85,35 @@ class Transformer(nn.Module):
         return self.final_layer(dec_output)
 
 
+class TransformerTrainingDataset(Dataset):
+    "Class for providing the training dataset for the Transformer class"
+    def __init__(self, data: torch.Tensor, seq_length: int):
+        "Constructor for this class"
+        self.data = data
+        self.seq_length = seq_length
+
+    def __len__(self):
+        "Override function from the super class"
+        # We can create a sequence starting at almost any index
+        return len(self.data) - self.seq_length - 1
+
+    def __getitem__(self, idx):
+        # Grab a chunk of text of length seq_length + 1
+        chunk = self.data[idx : idx + self.seq_length + 1]
+
+        # inp: The sequence the Encoder sees
+        # tar_inp: The sequence the Decoder sees (Teacher Forcing)
+        # Both are the same in this character-generation setup
+        inp = chunk[:-1]
+        tar_inp = chunk[:-1]
+
+        # tar_real: The actual 'next characters' we want to predict
+        # This is shifted one to the right
+        tar_real = chunk[1:]
+
+        return inp, tar_inp, tar_real
+
+
 def download_text(filename: str, url: str) -> None:
     "Download the file from the given URL, if not present in local disk"
     if not os.path.exists(filename):
@@ -93,7 +124,7 @@ def download_text(filename: str, url: str) -> None:
         print("Download complete.")
 
 
-def character_level_tokenizer(text: str) -> torch.Tensor:
+def character_level_tokenizer(text: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     "Convert the given text into a set of character level tokens"
     chars = sorted(list(set(text)))
     vocab_size = len(chars)
@@ -102,10 +133,62 @@ def character_level_tokenizer(text: str) -> torch.Tensor:
 
     print(f"Vocabulary size: {vocab_size}")
     print(f"Number of characters in text: {len(text)}")
-    
+
     # Encode the entire text
     data = torch.tensor([char_to_int[c] for c in text], dtype=torch.long)
-    return data
+    return data, char_to_int, int_to_char
+
+
+def create_masks(inp: str, tar: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    "Genereate the masks needed for the encoder/decoder layers of the transfomer"
+    # 1. Encoder Padding Mask (For the source sequence)
+    # Marks where the input has padding (0s)
+    enc_mask = None # (inp != 0).unsqueeze(1).unsqueeze(2)
+
+    # 2. Decoder Padding Mask (Used in Cross-Attention)
+    # Tells decoder to ignore padding in the encoder output
+    dec_mask = None # (inp != 0).unsqueeze(1).unsqueeze(2)
+
+    # 3. Look-Ahead Mask (Day 2 implementation)
+    # Prevents decoder from seeing the future
+    size = tar.size(1)
+    look_ahead_mask = torch.tril(torch.ones(size, size)).to(tar.device)
+
+    return enc_mask, look_ahead_mask, dec_mask
+
+
+def train_transformer(
+        model: Transformer,
+        train_loader: DataLoader,
+        device: torch.device,
+        vocab_size: int,
+        learning_rate: float = 0.0001,
+        max_iter: int = 100
+) -> None:
+    "Train the Transformer model with given training data"
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Model training loop
+    for epoch in range(max_iter):
+        epoch_loss = 0
+        for inp, tar_inp, tar_real in train_loader:
+            # Move data to the correct device
+            inp, tar_inp, tar_real = inp.to(device), tar_inp.to(device), tar_real.to(device)
+
+            # Forward pass
+            optimizer.zero_grad()
+            enc_mask, look_ahead_mask, dec_mask = create_masks(inp, tar_inp)
+            output = model(inp, tar_inp, enc_mask, look_ahead_mask, dec_mask)
+            loss = criterion(output.view(-1, vocab_size), tar_real.view(-1))
+            epoch_loss += loss.item()
+
+            # Backward pass
+            loss.backward()
+            optimizer.step()
+
+        if epoch % 10 == 0:
+            print(f"Epoch: {epoch} | Loss: {epoch_loss:.2f}")
 
 
 def test():
@@ -120,7 +203,29 @@ def test():
     with open(filename, "r") as f:
         text = f.read()
 
-    character_level_tokenizer(text)
+    encoded_text, char_to_int, int_to_char = character_level_tokenizer(text)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device used: {device}")
+
+    # How many characters the model is looking at once
+    seq_length = 128
+    dataset = TransformerTrainingDataset(encoded_text, seq_length)
+    dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
+
+    # Initialize the transformer
+    transformer = Transformer(
+        num_layers=6,
+        d_model=64,
+        num_heads=8,
+        d_ff=256,
+        input_vocab_size=len(char_to_int),
+        target_vocab_size=len(char_to_int),
+        pe_max_len=seq_length,
+        dropout=0.10
+    ).to(device)
+
+    train_transformer(transformer, dataloader, device, len(char_to_int))
 
 
 if __name__ == "__main__":
