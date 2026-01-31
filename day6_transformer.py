@@ -139,7 +139,7 @@ def character_level_tokenizer(text: str) -> Tuple[torch.Tensor, torch.Tensor, to
     return data, char_to_int, int_to_char
 
 
-def create_masks(inp: str, tar: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def create_masks(inp: torch.Tensor, tar: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     "Genereate the masks needed for the encoder/decoder layers of the transfomer"
     # 1. Encoder Padding Mask (For the source sequence)
     # Marks where the input has padding (0s)
@@ -163,7 +163,8 @@ def train_transformer(
         device: torch.device,
         vocab_size: int,
         learning_rate: float = 0.0001,
-        max_iter: int = 100
+        max_iter: int = 1,
+        target_loss: float = 1.8
 ) -> None:
     "Train the Transformer model with given training data"
     criterion = nn.CrossEntropyLoss()
@@ -172,6 +173,7 @@ def train_transformer(
     # Model training loop
     for epoch in range(max_iter):
         epoch_loss = 0
+        batch_num = 0
         for inp, tar_inp, tar_real in train_loader:
             # Move data to the correct device
             inp, tar_inp, tar_real = inp.to(device), tar_inp.to(device), tar_real.to(device)
@@ -181,11 +183,19 @@ def train_transformer(
             enc_mask, look_ahead_mask, dec_mask = create_masks(inp, tar_inp)
             output = model(inp, tar_inp, enc_mask, look_ahead_mask, dec_mask)
             loss = criterion(output.view(-1, vocab_size), tar_real.view(-1))
+            if loss <= target_loss:
+                print(f"Target loss of {target_loss:.2f} attained, exiting training")
+                return
+            
             epoch_loss += loss.item()
+
+            if batch_num % 10 == 0:
+                print(f"Epoch: {epoch:3d} | Batch: {batch_num:4d} | Loss: {loss:.2f} | Epoch Loss: {epoch_loss:.2f}")
 
             # Backward pass
             loss.backward()
             optimizer.step()
+            batch_num += 1
 
         if epoch % 10 == 0:
             print(f"Epoch: {epoch} | Loss: {epoch_loss:.2f}")
@@ -225,7 +235,12 @@ def test():
         dropout=0.10
     ).to(device)
 
+    # Train the transformer with the given dataset
     train_transformer(transformer, dataloader, device, len(char_to_int))
+
+    # Save the trained model to the local directory
+    torch.save(transformer.state_dict(), "shakespeare_llm.pth")
+    print("Model weights saved to shakespeare_llm.pth")
 
 
 if __name__ == "__main__":
