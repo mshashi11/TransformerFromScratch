@@ -2,6 +2,7 @@
 "Implementation of a full Transformer model"
 
 import os
+import json
 from typing import Tuple
 
 import torch
@@ -119,24 +120,23 @@ def download_text(filename: str, url: str) -> None:
     if not os.path.exists(filename):
         print("Downloading dataset...")
         response = requests.get(url)
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding="utf-8") as f:
             f.write(response.text)
         print("Download complete.")
 
 
-def character_level_tokenizer(text: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def character_level_tokenizer(text: str) -> Tuple[torch.Tensor, dict[str, int]]:
     "Convert the given text into a set of character level tokens"
     chars = sorted(list(set(text)))
     vocab_size = len(chars)
     char_to_int = {ch: i for i, ch in enumerate(chars)}
-    int_to_char = {i: ch for i, ch in enumerate(chars)}
 
     print(f"Vocabulary size: {vocab_size}")
     print(f"Number of characters in text: {len(text)}")
 
     # Encode the entire text
     data = torch.tensor([char_to_int[c] for c in text], dtype=torch.long)
-    return data, char_to_int, int_to_char
+    return data, char_to_int
 
 
 def create_masks(inp: torch.Tensor, tar: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -186,10 +186,10 @@ def train_transformer(
             if loss <= target_loss:
                 print(f"Target loss of {target_loss:.2f} attained, exiting training")
                 return
-            
+
             epoch_loss += loss.item()
 
-            if batch_num % 10 == 0:
+            if batch_num % 100 == 0:
                 print(f"Epoch: {epoch:3d} | Batch: {batch_num:4d} | Loss: {loss:.2f} | Epoch Loss: {epoch_loss:.2f}")
 
             # Backward pass
@@ -201,6 +201,12 @@ def train_transformer(
             print(f"Epoch: {epoch} | Loss: {epoch_loss:.2f}")
 
 
+def save_vocab(char_to_int: dict[str, int]) -> None:
+    "Save the vocabulary to json file to ensure consistency between training and inference"
+    with open("vocab.json", "w", encoding="utf-8") as f:
+        json.dump({"char_to_int": char_to_int}, f)
+
+
 def test():
     "Test function for this script"
     print("Testing the Transformer class")
@@ -210,10 +216,11 @@ def test():
     # Download the text, if not present locally
     download_text(filename, url)
     text = ""
-    with open(filename, "r") as f:
+    with open(filename, "r", encoding="utf-8") as f:
         text = f.read()
 
-    encoded_text, char_to_int, int_to_char = character_level_tokenizer(text)
+    encoded_text, char_to_int = character_level_tokenizer(text)
+    save_vocab(char_to_int)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device used: {device}")
@@ -236,7 +243,7 @@ def test():
     ).to(device)
 
     # Train the transformer with the given dataset
-    train_transformer(transformer, dataloader, device, len(char_to_int))
+    train_transformer(transformer, dataloader, device, len(char_to_int), max_iter=10, target_loss=1.2)
 
     # Save the trained model to the local directory
     torch.save(transformer.state_dict(), "shakespeare_llm.pth")

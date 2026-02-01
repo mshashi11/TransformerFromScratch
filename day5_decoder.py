@@ -60,8 +60,8 @@ class DecoderLayer(nn.Module):
 
         # Step 2: Cross-Attention
         # Q comes from Decoder (x), K and V come from Encoder (enc_output)
-        attn2 = self.mha2(x, enc_output, enc_output, padding_mask)
-        x = self.norm2(x + self.dropout(attn2))
+        # attn2 = self.mha2(x, enc_output, enc_output, padding_mask)
+        # x = self.norm2(x + self.dropout(attn2))
 
         # Step 3: Feed-forward
         ffn_output = self.ffn(x)

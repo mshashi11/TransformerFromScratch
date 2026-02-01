@@ -1,9 +1,12 @@
 #!/usr/bin/python3
 "Script for running inference on a trained Transformer model"
 
+import json
+from typing import Tuple
+
 import torch
 import torch.nn.functional as F
-from day6_transformer import Transformer, character_level_tokenizer, create_masks
+from day6_transformer import Transformer, create_masks
 
 def load_model(checkpoint_path: str, vocab_size: int, device: torch.device) -> Transformer:
     "Load the Transformer model from the given checkpoint path"
@@ -70,20 +73,30 @@ def generate_text(
     return generated_text
 
 
+def read_vocab(filename: str) -> Tuple[dict[str, int], dict[int, str]]:
+    "Read the vocabulary file from local directory"
+    with open(filename, "r", encoding="utf-8") as f:
+        vocab = json.load(f)
+
+    char_to_int = vocab['char_to_int']
+
+    # Get int to char from char_to_int mapping
+    int_to_char = {i: ch for ch, i in char_to_int.items()}
+
+    return char_to_int, int_to_char
+
+
 def test():
     "Test function for this script"
-    # Load the necessary data for vocabulary etc here
-    with open("tiny_shakespeare.txt", "r") as f:
-        text = f.read()
-
-    _, char_to_int, int_to_char = character_level_tokenizer(text)
+    # Load the vocabulary data
+    char_to_int, int_to_char = read_vocab("vocab.json")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model("shakespeare_llm.pth", len(char_to_int), device)
 
     print("\n--- GENERATED SHAKESPEARE ---")
     prompt = "OTHELLO:"
-    print(generate_text(model, prompt, char_to_int, int_to_char, device, temperature=1.2))
+    print(generate_text(model, prompt, char_to_int, int_to_char, device, temperature=0.8))
 
 
 if __name__ == "__main__":
